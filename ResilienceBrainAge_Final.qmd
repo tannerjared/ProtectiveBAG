@@ -1,0 +1,1289 @@
+---
+title: "Chronic Pain Stage, Socioenvironmental Risk, Protective Factors, and Brain Age Gap"
+author: "Jared J Tanner"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+format:
+  html:
+    grid:
+      body-width: 1200px
+    table:
+      width: 1000px
+  pdf:
+    toc: true
+    number-sections: true
+    colorlinks: true
+editor: visual
+---
+
+```{r}
+#| echo: false
+#| warning: false
+
+# List of package names to install
+packages_to_install <- c("ggplot2", "tidyverse", "psych", "dplyr", "haven", "xtable", "remotes", "MBESS", "emmeans", "sjPlot", "ggsci")
+
+# Check if each package is already installed; if not, install it
+for (package in packages_to_install) {
+  if (!requireNamespace(package, quietly = TRUE)) {
+    install.packages(package, dependencies = TRUE, repos = "http://cran.rstudio.com/")
+  }
+}
+
+# Define the package name
+package_name <- "lme4"
+
+# Check if the package is installed; install it if it's not
+if (!require(package_name, character.only = TRUE)) {
+  install.packages(package_name, type = "source", repos = "http://cran.rstudio.com/")
+  library(package_name, character.only = TRUE)
+}
+
+# Install apaTables package from GitHub using remotes
+if (!requireNamespace("apaTables", quietly = TRUE)) {
+  if (!requireNamespace("remotes", quietly = TRUE)) {
+    install.packages("remotes")
+  }
+  remotes::install_github("dstanley4/apaTables")
+}
+
+# Load required packages
+# List of package names
+packagesToLoad <- c("ggplot2", "tidyverse", "psych", "dplyr", "haven", "xtable", "apaTables", "MBESS", "emmeans", "lme4", "sjPlot", "ggsci")
+
+# Load each package using a loop
+for (package in packagesToLoad) {
+    library(package, character.only = TRUE)
+}
+resil_BAG <- read.csv("resil_BAG.csv")
+```
+
+## Summary Statistics
+
+```{r}
+#| echo: false
+
+summary_vars <- c("age", "sex", "site", "comorbid", "IQR", "FITT_am", "BAG", "resilience_new_1", "sd_risk_1", "BrainAgePython_long_tp1", "BrainAgePython_long_tp2")
+summary_stats <- describe(resil_BAG[, c(summary_vars)])
+
+print(summary_stats)
+
+# Loop through the variables and perform Shapiro-Wilk normality test
+for (variable in summary_vars) {
+  # Ensure variable exists and is numeric before proceeding
+  if (!is.null(resil_BAG[[variable]]) && is.numeric(resil_BAG[[variable]])) {
+    cat("Shapiro-Wilk Normality Test for", variable, ":\n")
+    test_result <- shapiro.test(resil_BAG[[variable]][!is.na(resil_BAG[[variable]])])  # Exclude NA values for the test
+    cat("Test Statistic:", test_result$statistic, "\n")
+    cat("P-value:", test_result$p.value, "\n")
+  
+    if (test_result$p.value < 0.05) {
+      cat("The variable is not normally distributed (p-value <", test_result$p.value, ")\n")
+    } else {
+      cat("The variable is normally distributed (p-value =", test_result$p.value, ")\n")
+    }
+    cat("\n")
+  } else {
+    cat("Skipping Shapiro-Wilk test for", variable, ": Variable is not numeric or is missing.\n")
+  }
+}
+
+# Loop through the variables and create plots if min and max values are finite
+for (variable in summary_vars) {
+  if (is.numeric(resil_BAG[[variable]])) {  # Check if the variable is numeric
+    min_value <- min(resil_BAG[[variable]], na.rm = TRUE)
+    max_value <- max(resil_BAG[[variable]], na.rm = TRUE)
+
+    if (is.finite(min_value) && is.finite(max_value)) {
+      png_file <- paste0("NormalityPlot_", variable, ".png")
+      png(filename = png_file, width = 1600, height = 1200)
+      par(mfrow = c(2, 2))
+
+      # Histogram with normal distribution curve
+      hist_data <- resil_BAG[[variable]][!is.na(resil_BAG[[variable]])]  # Exclude NA values for plotting
+      hist(hist_data, main = paste("Histogram of", variable), xlab = variable, col = "lightblue", prob = TRUE)
+      mu <- mean(hist_data)
+      sigma <- sd(hist_data)
+      x <- seq(min(hist_data), max(hist_data), length = 100)
+      y <- dnorm(x, mean = mu, sd = sigma)
+      lines(x, y, col = "red")
+
+      # Q-Q and P-P Plots
+      qqnorm(hist_data, main = paste("Q-Q Plot of", variable))
+      qqline(hist_data, col = 2)
+      pp_plot_data <- sort(hist_data)
+      theoretical_quantiles <- qnorm(ppoints(length(pp_plot_data)))
+      plot(theoretical_quantiles, pp_plot_data, main = paste("P-P Plot of", variable), xlab = "Theoretical Quantiles", ylab = "Ordered Values")
+
+      dev.off()
+    } else {
+      cat("Skipping variable", variable, "due to non-finite min/max values.\n")
+    }
+  } else {
+    cat("Skipping plots for", variable, ": Variable is not numeric.\n")
+  }
+}
+
+if (is.finite(min_value) && is.finite(max_value)) {
+# Function to plot boxplots for each variable
+plot_outliers <- function(data, variable) {
+  data %>%
+    ggplot(aes(x = factor(1), y = .data[[variable]])) +
+    geom_boxplot() +
+    labs(title = paste("Boxplot for", variable),
+         x = "",
+         y = variable)
+}
+
+# List of variables to check for outliers
+variables <- c("age", "sex", "site", "comorbid", "IQR", "FITT_am", "BAG", "resilience_new_1", "sd_risk_1","BrainAgePython_long_tp1", "BrainAgePython_long_tp2")
+
+# Generate boxplots for each variable
+for (var in variables) {
+  print(plot_outliers(resil_BAG, var))
+}
+} else {
+  cat("Skipping variable", variable, "due to non-finite min/max values.\n")
+}
+# Additional code to calculate and display potential outliers
+# For numeric variables only
+for (var in variables) {
+  if (is.numeric(resil_BAG[[var]])) {
+    Q1 <- quantile(resil_BAG[[var]], 0.25, na.rm = TRUE)
+    Q3 <- quantile(resil_BAG[[var]], 0.75, na.rm = TRUE)
+    IQR <- Q3 - Q1
+    lower_bound <- Q1 - 1.5 * IQR
+    upper_bound <- Q3 + 1.5 * IQR
+    outliers <- resil_BAG[[var]][resil_BAG[[var]] < lower_bound | resil_BAG[[var]] > upper_bound]
+    cat("Outliers in", var, ":", outliers, "\n\n")
+  }
+}
+
+#These are calculating residuals for other analyses
+model_resid <- lm(resil_BAG$BAG ~ resil_BAG$IQR + resil_BAG$sex + resil_BAG$site + resil_BAG$sd_risk_1 + resil_BAG$comorbid, data = resil_BAG, na.action = na.exclude)
+
+resil_BAG$BAG_resid <- residuals(model_resid)
+
+model_resid_noSERisk <- lm(resil_BAG$BAG ~ resil_BAG$IQR + resil_BAG$sex + resil_BAG$site + resil_BAG$comorbid, data = resil_BAG, na.action = na.exclude)
+
+resil_BAG$BAG_resid_noSERisk <- residuals(model_resid_noSERisk)
+
+model_resid_FITT <- lm(resil_BAG$BAG ~ resil_BAG$IQR + resil_BAG$sex + resil_BAG$site + resil_BAG$FITT_am + resil_BAG$comorbid, data = resil_BAG, na.action = na.exclude)
+
+resil_BAG$BAG_resid_FITT <- residuals(model_resid_FITT)
+
+#I had an error running this initially but I restarted my R session and it fixed it: https://stackoverflow.com/questions/76558629/i-want-to-get-rid-of-cachekey-error-in-rs-workingdataenv
+
+resil_BAG$resil_group <- factor(resil_BAG$low_resilience, levels = c(0, 1), labels = c("High", "Low"))
+
+resil_BAG$SE_risk_group <- factor(resil_BAG$high_risk, levels = c(0, 1), labels = c("Low", "High"))
+resil_BAG$fitt_high_low <- factor(resil_BAG$high_fitt_med, levels = c(0, 1), labels = c("Low", "High"))
+
+##########Residual scores for scatters#############
+model_BAG_resid <- lm(resil_BAG$BAG ~ resil_BAG$IQR + resil_BAG$sex + resil_BAG$site + resil_BAG$sd_risk_1 + resil_BAG$comorbid + resil_BAG$FITT_am, data = resil_BAG, na.action = na.exclude)
+
+resil_BAG$forResilience_BAG_resid <- residuals(model_BAG_resid)
+
+model_nonSERisk_BAG_resid <- lm(resil_BAG$BAG ~ resil_BAG$IQR + resil_BAG$sex + resil_BAG$site + resil_BAG$comorbid + resil_BAG$FITT_am + resil_BAG$resilience_new_1, data = resil_BAG, na.action = na.exclude)
+
+resil_BAG$forSERisk_BAG_resid <- residuals(model_nonSERisk_BAG_resid)
+```
+
+This program also saves out a Latex .tex file that can be converted to PDF (and then opened in Word) providing summary statistics for the sample. When done, compile the .tex file. I used texlive in Linux: pdflatex whole_sample_summary_statistics.tex
+
+```{r}
+#| echo: false
+#| warning: false
+#| results: hide
+
+# Create a formatted table using xtable
+formatted_table <- xtable(summary_stats, caption = "Summary Statistics for the Whole Sample", label = "tab:summary")
+
+# Define the LaTeX preamble and document structure
+latex_preamble <- "\\documentclass{apa6}
+\\usepackage{graphicx}
+\\usepackage{longtable}
+\\usepackage{tabu}
+
+\\begin{document}
+\\title{Summary Statistics}
+\\author{Jared J. Tanner}
+\\date{\\today}
+
+\\maketitle
+"
+
+# Define the ending for the LaTeX document
+latex_end <- "\\end{document}"
+
+# Combine the preamble, table content, and ending
+combined_content <- paste(latex_preamble, print.xtable(formatted_table), latex_end, sep = "\n")
+
+# Define the file path and name for the .tex file
+output_tex_file <- "whole_sample_summary_statistics.tex"
+
+# Save the combined content to the .tex file
+writeLines(combined_content, con = output_tex_file)
+
+# Print a confirmation message
+cat("Table, LaTeX preamble, and document ending saved to", output_tex_file, "\n")
+```
+
+## Summary Statistics by Chronic Pain Stage group
+
+```{r}
+#| echo: false
+group_summary <- by(resil_BAG[, summary_vars], resil_BAG$fitt_high_low, describe)
+
+for (group_name in names(group_summary)) {
+  cat("Chronic Pain Stage Group:", group_name, "\n")
+  print(group_summary[[group_name]])
+  cat("\n")
+}
+
+# Loop through the variables and perform non-parametric tests
+for (variable in summary_vars) {
+  cat("Wilcoxon Rank-Sum Test for", variable, ":\n")
+  formula <- as.formula(paste(variable, "~ fitt_high_low"))
+  test_result <- wilcox.test(formula, data = resil_BAG)
+  print(test_result)
+  cat("\n")
+}
+```
+
+## Summary Statistics by SE Risk Group
+
+```{r}
+#| echo: false
+group_summary <- by(resil_BAG[, summary_vars], resil_BAG$SE_risk_group, describe)
+
+for (group_name in names(group_summary)) {
+  cat("SE Risk Group:", group_name, "\n")
+  print(group_summary[[group_name]])
+  cat("\n")
+}
+
+# Loop through the variables and perform non-parametric tests
+for (variable in summary_vars) {
+  cat("Wilcoxon Rank-Sum Test for", variable, ":\n")
+  formula <- as.formula(paste(variable, "~ SE_risk_group"))
+  test_result <- wilcox.test(formula, data = resil_BAG)
+  print(test_result)
+  cat("\n")
+}
+```
+
+## Summary Statistics by Protective Factors Group
+
+```{r}
+#| echo: false
+group_summary <- by(resil_BAG[, summary_vars], resil_BAG$resil_group, describe)
+
+for (group_name in names(group_summary)) {
+  cat("Protective Factors Group:", group_name, "\n")
+  print(group_summary[[group_name]])
+  cat("\n")
+}
+
+# Loop through the variables and perform non-parametric tests
+for (variable in summary_vars) {
+  cat("Wilcoxon Rank-Sum Test for", variable, ":\n")
+  formula <- as.formula(paste(variable, "~ resil_group"))
+  test_result <- wilcox.test(formula, data = resil_BAG)
+  print(test_result)
+  cat("\n")
+}
+```
+
+```{r}
+#| echo: false
+
+#Create an APA-style correlation table and save to Word .doc file
+df_cor <- resil_BAG[, c("age", "sex", "site", "comorbid", "IQR", "BAG", "FITT_am", "resilience_new_1", "sd_risk_1")]
+table2 <- apa.cor.table(df_cor, table.number = 2)
+print(table2)
+apa.save(filename = "table2_correlations.doc", table2)
+```
+
+## Aim 1A Analyses
+
+### FITT without SE Risk or Protective Factors
+
+```{r}
+#| echo: false
+# Create a formula to define the model
+
+formula_aa <- BAG ~ IQR + sex + site + comorbid
+
+# Fit the linear regression model
+modelaa_FITT <- lm(formula_aa, data = resil_BAG, na.action = na.exclude)
+
+# Display a summary of the model
+summary(modelaa_FITT)
+
+formula_a <- BAG ~ IQR + sex + site + comorbid + FITT_am
+
+# Fit the linear regression model
+modela_FITT <- lm(formula_a, data = resil_BAG, na.action = na.exclude)
+
+# Display a summary of the model
+summary(modela_FITT)
+
+table3a <- apa.reg.table(modela_FITT, table.number = 3)
+apa.save(filename = "table3_fitt_reg.doc", table3a)
+
+# Extract R-squared values from both models
+R2_full <- summary(modela_FITT)$r.squared
+R2_reduced <- summary(modelaa_FITT)$r.squared
+
+# Calculate change in R-squared
+delta_R2 <- R2_full - R2_reduced
+
+# Calculate Cohen's f^2
+f2 <- delta_R2 / (1 - R2_full)
+
+# Display Cohen's f^2
+cat("Cohen's f^2 for Chronic Pain Stage:", f2, "\n")
+```
+
+### Scatter Plot of Minimally Adjusted BAG and Chronic Pain Stage
+
+This adjusts for sex, site, comorbidities, and IQR
+
+```{r, fig.width=16, fig.height=10, dpi=600}
+#| echo: false
+##########Residual score for scatter#############
+model_BAG_min_resid <- lm(resil_BAG$BAG ~ resil_BAG$IQR + resil_BAG$sex + resil_BAG$site + resil_BAG$comorbid, data = resil_BAG, na.action = na.exclude)
+
+resil_BAG$forFITT_BAG_min_resid <- residuals(model_BAG_min_resid)
+
+model_BAG_FITT <- lm(forFITT_BAG_min_resid ~ FITT_am, data = resil_BAG)
+explained_variance_fitt <- summary(model_BAG_FITT)$r.squared
+cat("Explained Variance (R-squared) of adjusted BAG from Chronic Pain Stage:", explained_variance_fitt, "\n")
+
+# Create a label with the R-squared value displayed as "R²"
+label_text <- sprintf("R² = %.2f", explained_variance_fitt)
+
+# Create the ggplot with the modified label text
+AdjBAG_FITT <- ggplot(resil_BAG, aes(x = FITT_am, y = forFITT_BAG_min_resid)) +
+  geom_point(size = 3) +
+  geom_text(
+    x = max(resil_BAG$FITT_am), y = min(resil_BAG$forFITT_BAG_min_resid)+2,
+    label = label_text, hjust = 1, vjust = 1,
+    size = 8  # Adjust the size as needed
+  ) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(x = "Chronic Pain Stage", y = "Adjusted Brain Age Gap")
+
+# Print the plot
+AdjBAG_FITT + theme_minimal(base_size = 22)
+plot_save <- AdjBAG_FITT + theme_minimal(base_size = 22)
+
+ggsave("minimally-adjusted_BAG_FITT_plot.tiff", plot_save, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+```
+
+## Aim 1B Analyses
+
+### Socioenvironmental Risk and BAG
+
+```{r}
+#| echo: false
+
+formula_seRiska <- BAG ~ IQR + sex + site + comorbid
+
+model_seRiska <- lm(formula_seRiska, data = resil_BAG, na.action = na.exclude)
+
+summary(model_seRiska)
+
+formula_seRisk <- BAG ~ IQR + sex + site + comorbid + sd_risk_1
+
+model_seRisk <- lm(formula_seRisk, data = resil_BAG, na.action = na.exclude)
+
+summary(model_seRisk)
+
+table6_seRisk_reg <- apa.reg.table(model_seRisk, table.number = 6)
+
+apa.save(filename = "table6_seRisk_reg.doc", table6_seRisk_reg)
+
+# Extract R-squared values from both models
+R2_full <- summary(model_seRisk)$r.squared
+R2_reduced <- summary(model_seRiska)$r.squared
+
+# Calculate change in R-squared
+delta_R2 <- R2_full - R2_reduced
+
+# Calculate Cohen's f^2
+f2 <- delta_R2 / (1 - R2_full)
+
+# Display Cohen's f^2
+cat("Cohen's f^2 for Socioenvironmental Risk:", f2, "\n")
+
+#alternative table
+#library(broom)
+#library(report)
+#library(rempsyc)
+#(stats.table <- tidy(model_ses, conf.int = TRUE))
+#nice_table(stats.table, report = "lm", short = TRUE) OR nice_table(stats.table, report = "lm")
+#my_table <- nice_table(stats.table, report = "lm")
+#flextable::save_as_docx(my_table, path = "table4_tmp.docx")
+```
+
+### Scatter Plot of Minimally Adjusted BAG and SE Risk
+
+This adjusts for sex, site, comorbidities, and IQR
+
+```{r, fig.width=16, fig.height=10, dpi=600}
+#| echo: false
+##########Residual score for scatter#############
+model_BAG_min_resid <- lm(resil_BAG$BAG ~ resil_BAG$IQR + resil_BAG$sex + resil_BAG$site + resil_BAG$comorbid  , data = resil_BAG, na.action = na.exclude)
+
+resil_BAG$forSERisk_BAG_min_resid <- residuals(model_BAG_min_resid)
+
+model_BAG_SERisk <- lm(forSERisk_BAG_min_resid ~ sd_risk_1, data = resil_BAG)
+explained_variance_SERisk <- summary(model_BAG_SERisk)$r.squared
+cat("Explained Variance (R-squared) of adjusted BAG from Socioenvironmental Risk:", explained_variance_SERisk, "\n")
+
+# Create a label with the R-squared value displayed as "R²"
+label_text <- sprintf("R² = %.2f", explained_variance_SERisk)
+
+# Create the ggplot with the modified label text
+AdjBAG_SERisk <- ggplot(resil_BAG, aes(x = sd_risk_1, y = forSERisk_BAG_min_resid)) +
+  geom_point(size = 3) +
+  geom_text(
+    x = max(resil_BAG$sd_risk_1), y = min(resil_BAG$forSERisk_BAG_min_resid)+2,
+    label = label_text, hjust = 1, vjust = 1,
+    size = 8  # Adjust the size as needed
+  ) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(x = "Socioenvironmental Risk", y = "Adjusted Brain Age Gap")
+
+# Print the plot
+AdjBAG_SERisk + theme_minimal(base_size = 22)
+plot_save <- AdjBAG_SERisk + theme_minimal(base_size = 22)
+
+ggsave("minimally-adjusted_BAG_SERisk_plot.tiff", plot_save, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+```
+
+### SE high and low risk ANCOVA
+
+```{r, fig.width=16, fig.height=10, dpi=600}
+#| echo: false
+ses_lm <- resil_BAG %>%
+  drop_na(resilience_new_1) %>%
+  lm(BAG ~ sex + site + comorbid + IQR + SE_risk_group, data = .)
+
+summary(ses_lm)
+
+table_ses_ancova <- apa.aov.table(ses_lm, table.number = 7)
+
+apa.save(filename = "ancova_ses_table7.doc", table_ses_ancova)
+
+print(table_ses_ancova)
+
+theme_set(theme_minimal(base_size = 32))
+FigSE0 <- ggplot(resil_BAG, aes(x = as.factor(SE_risk_group), y = BAG_resid_noSERisk)) + geom_violin(trim = FALSE, scale = "width", fill = "lightgray", color = "black", alpha = 0.8, width = 0.6, draw_quantiles = c(0.25, 0.5, 0.75)) + geom_jitter(height = 0.05, width = 0.15, alpha = 0.8, size = 3) + labs(x = "Socioenvironmental Risk Group", y = "Adjusted Brain Age Gap") + theme(plot.title = element_text(hjust = 0.5), legend.position = "bottom")
+
+print(FigSE0)
+
+theme_set(theme_minimal(base_size = 20))
+FigSE0_save <- FigSE0 + theme_minimal(base_size = 22)
+
+ggsave("Figure1b_posthoc.tiff", FigSE0, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+
+#Estimated marginal means
+
+emm_ses <- emmeans(ses_lm, ~ SE_risk_group)
+
+summary(pairs(emm_ses))
+```
+
+## Aim 1C Analyses
+
+### Protective Factors and BAG
+
+```{r}
+#| echo: false
+
+formula_resila <- BAG ~ IQR + sex + site + comorbid
+
+model_resila <- lm(formula_resila, data = resil_BAG, na.action = na.exclude)
+
+summary(model_resila)
+
+formula_resil <- BAG ~ IQR + sex + site + comorbid + resilience_new_1
+
+model_resil <- lm(formula_resil, data = resil_BAG, na.action = na.exclude)
+
+summary(model_resil)
+
+table8_resil_reg <- apa.reg.table(model_resil, table.number = 8)
+
+apa.save(filename = "table8_resil_reg.doc", table8_resil_reg)
+
+# Extract R-squared values from both models
+R2_full <- summary(model_resil)$r.squared
+R2_reduced <- summary(model_resila)$r.squared
+
+# Calculate change in R-squared
+delta_R2 <- R2_full - R2_reduced
+
+# Calculate Cohen's f^2
+f2 <- delta_R2 / (1 - R2_full)
+
+# Display Cohen's f^2
+cat("Cohen's f^2 for Protective Factors:", f2, "\n")
+
+#alternative table
+#library(broom)
+#library(report)
+#library(rempsyc)
+#(stats.table <- tidy(model_resil, conf.int = TRUE))
+#nice_table(stats.table, report = "lm", short = TRUE) OR nice_table(stats.table, report = "lm")
+#my_table <- nice_table(stats.table, report = "lm")
+#flextable::save_as_docx(my_table, path = "table8_tmp.docx")
+```
+
+### Scatter Plot of Minimally Adjusted BAG and Protective Factors
+
+This adjusts for sex, site, comorbidities, and IQR
+
+```{r, fig.width=16, fig.height=10, dpi=600}
+#| echo: false
+##########Residual score for scatter#############
+model_BAG_min_resid <- lm(resil_BAG$BAG ~ resil_BAG$IQR + resil_BAG$sex + resil_BAG$site + resil_BAG$comorbid , data = resil_BAG, na.action = na.exclude)
+
+resil_BAG$forResil_BAG_min_resid <- residuals(model_BAG_min_resid)
+
+model_BAG_resil <- lm(forResil_BAG_min_resid ~ resilience_new_1, data = resil_BAG)
+explained_variance_resil <- summary(model_BAG_resil)$r.squared
+cat("Explained Variance (R-squared) of adjusted BAG from Protective Factors:", explained_variance_resil, "\n")
+
+# Create a label with the R-squared value displayed as "R²"
+label_text <- sprintf("R² = %.2f", explained_variance_resil)
+
+# Create the ggplot with the modified label text
+AdjBAG_resil <- ggplot(resil_BAG, aes(x = resilience_new_1, y = forResil_BAG_min_resid)) + geom_point(size = 3) + geom_text(
+    x = max(resil_BAG$resilience_new_1), y = min(resil_BAG$forResil_BAG_min_resid)+2,
+    label = label_text, hjust = 1, vjust = 1,
+    size = 8  # Adjust the size as needed
+  ) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(x = "Protective Factors", y = "Adjusted Brain Age Gap")
+
+# Print the plot
+AdjBAG_resil + theme_minimal(base_size = 22)
+plot_save <- AdjBAG_resil + theme_minimal(base_size = 22)
+
+ggsave("minimally-adjusted_BAG_resilience_plot.tiff", plot_save, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+```
+
+### Protective Factors median split groups ANCOVA
+
+```{r, fig.width=16, fig.height=10, dpi=600}
+#| echo: false
+resil_lm <- resil_BAG %>%
+  drop_na(resilience_new_1) %>%
+  lm(BAG ~ resil_group + sex + site + comorbid + IQR, data = .)
+
+summary(resil_lm)
+
+table_resil_ancova <- apa.aov.table(resil_lm, table.number = 9)
+apa.save(filename = "ancova_resil_table9.doc", table_resil_ancova)
+print(table_resil_ancova)
+
+theme_set(theme_minimal(base_size = 32))
+Fig0a <- ggplot(resil_BAG, aes(x = resil_group, y = BAG_resid_noSERisk)) +
+  geom_violin(trim = FALSE, scale = "width", fill = "lightgray", color = "black", alpha = 0.8, width = 0.6, draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_jitter(height = 0.05, width = 0.15, alpha = 0.8, size = 3) +
+  labs(x = "Protective Factors Group", y = "Adjusted Brain Age Gap") +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "bottom")
+Fig0a
+
+Fig0a_save <- Fig0a + theme_minimal(base_size = 18)
+
+ggsave("Figure1c_posthoc.tiff", Fig0a_save, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+
+emm_res <- emmeans(resil_lm, ~ resil_group)
+
+summary(pairs(emm_res))
+```
+
+## Aim 1D Analyses
+
+### Protective Factors and BAG accounting for SE Risk and Chronic Pain Stage
+
+```{r}
+#| echo: false
+
+# Create a formula to define the model
+formula_block1 <- BAG ~ IQR + sex + site + comorbid + FITT_am
+
+model_block1 <- lm(formula_block1, data = resil_BAG, na.action = na.exclude)
+
+formula_block2 <- BAG ~ IQR + sex + site + comorbid + FITT_am + sd_risk_1
+
+model_block2 <- lm(formula_block2, data = resil_BAG, na.action = na.exclude)
+
+formula_block3 <- BAG ~ IQR + sex + site + comorbid + FITT_am + sd_risk_1 + resilience_new_1
+
+model_block3 <- lm(formula_block3, data = resil_BAG, na.action = na.exclude)
+
+summary(model_block3)
+
+table10_fitt_ses_resil_reg <- apa.reg.table(model_block1, model_block2, model_block3, table.number = 10)
+
+apa.save(filename = "table10_Aim1d_fitt_ses_resil_reg.doc", table10_fitt_ses_resil_reg)
+
+#alternative table with just one block
+#library(broom)
+#library(report)
+#library(rempsyc)
+#(stats.table <- tidy(model_block3, conf.int = TRUE))
+#nice_table(stats.table, report = "lm", short = TRUE) OR nice_table(stats.table, report = "lm")
+#my_table <- nice_table(stats.table, report = "lm")
+#flextable::save_as_docx(my_table, path = "table9_tmp.docx")
+
+resil2_lm <- resil_BAG %>%
+  drop_na(resilience_new_1) %>%
+  lm(BAG ~ resil_group + sex + site + comorbid + IQR + FITT_am + sd_risk_1, data = .)
+
+summary(resil2_lm)
+
+table_resil_ancova2 <- apa.aov.table(resil2_lm, table.number = 20)
+apa.save(filename = "ancova_resil2_table20.doc", table_resil_ancova)
+print(table_resil_ancova2)
+
+emm_res2 <- emmeans(resil2_lm, ~ resil_group)
+
+summary(pairs(emm_res2))
+```
+
+### Protective Factors, SE Risk, and FITT Continuous Interactions
+
+```{r}
+#| echo: false
+
+mean_fitt <- mean(resil_BAG$FITT_am)
+mean_sd_risk <- mean(resil_BAG$sd_risk_1)
+mean_resil <- mean(resil_BAG$resilience_new_1)
+
+resil_BAG$cent_FITT_am <- resil_BAG$FITT_am - mean_fitt
+resil_BAG$cent_resil <- resil_BAG$resilience_new_1 - mean_resil
+resil_BAG$cent_sd_risk <- resil_BAG$sd_risk_1 - mean_sd_risk
+
+resil_BAG$cent_fitt_sd_int <- resil_BAG$cent_FITT_am * resil_BAG$cent_sd_risk
+resil_BAG$cent_resil_fitt_int <- resil_BAG$cent_resil * resil_BAG$cent_FITT_am
+resil_BAG$cent_resil_sd_int <- resil_BAG$cent_resil * resil_BAG$cent_sd_risk
+resil_BAG$cent_fitt_sd_resil_int <- resil_BAG$cent_FITT_am * resil_BAG$cent_sd_risk * resil_BAG$cent_resil
+
+formula_interactions <- BAG ~ IQR + sex + site + comorbid + cent_FITT_am + cent_sd_risk + cent_resil + cent_fitt_sd_int + cent_resil_fitt_int + 
+  cent_resil_sd_int + cent_fitt_sd_resil_int
+
+model_interactions <- lm(formula_interactions, data = resil_BAG, na.action = na.exclude)
+
+summary(model_interactions)
+
+table_full_resil_sdrisk_fitt_continuous <- apa.aov.table(model_interactions, table.number = 11)
+apa.save(filename = "table11_full_resil_sdrisk_fitt_continuous.doc", table_full_resil_sdrisk_fitt_continuous)
+print(table_full_resil_sdrisk_fitt_continuous)
+
+```
+
+### Protective Factors, SE Risk, and FITT group interactions (2-way and 3-way)
+
+This is to show the full model with all interactions.
+
+```{r}
+#| echo: false
+
+centFITTGroup = NULL
+cent_FITT_Resil_group_int = NULL
+cent_sd_risk_FITT_group_int = NULL
+cent_sd_risk_FITT_Resil_group_int = NULL
+
+resil_BAG <- resil_BAG %>%
+  mutate(centFITTGroup = high_fitt_med - mean(high_fitt_med, na.rm = TRUE))
+
+resil_BAG <- resil_BAG %>%
+  mutate(centResilGroup = resil_group_num - mean(resil_group_num, na.rm = TRUE))
+
+resil_BAG <- resil_BAG %>%
+  mutate(centSEGroup = SE_risk_group_num - mean(SE_risk_group_num, na.rm = TRUE))
+
+resil_BAG$cent_FITT_Resil_group_int <- resil_BAG$centFITTGroup * resil_BAG$centResilGroup
+
+resil_BAG$cent_sd_risk_FITT_group_int <- resil_BAG$centSEGroup * resil_BAG$centFITTGroup
+
+resil_BAG$cent_sd_risk_FITT_Resil_group_int <- resil_BAG$centSEGroup * resil_BAG$centFITTGroup * resil_BAG$centResilGroup
+
+groupInter2_lm <- resil_BAG %>%
+  drop_na(resilience_new_1) %>%
+  lm(BAG ~ centResilGroup + IQR + sex + site + comorbid + centSEGroup + centFITTGroup + cent_sd_risk_FITT_Resil_group_int + cent_FITT_Resil_group_int + cent_sd_risk_FITT_group_int + cent_sd_risk_FITT_Resil_group_int, data = .)
+
+summary(groupInter2_lm)
+
+table_full_resil_sesrisk_fitt_ancova <- apa.aov.table(groupInter2_lm, table.number = 12)
+apa.save(filename = "ancova_full_resil_sesrisk_fitt_table12.doc", table_full_resil_sesrisk_fitt_ancova)
+print(table_full_resil_sesrisk_fitt_ancova)
+```
+
+## Scatter Plots of Adjusted BAG and Protective Factors/SE Risk
+
+### Predicting Adjusted BAG from Protective Factors
+
+This adjusts for sex, site, comorbidities, IQR, FITT, and SE Risk
+
+```{r, fig.width=16, fig.height=10, dpi=600}
+#| echo: false
+model_BAG_Resil <- lm(forResilience_BAG_resid ~ resilience_new_1, data = resil_BAG)
+explained_variance_resil <- summary(model_BAG_Resil)$r.squared
+cat("Explained Variance (R-squared) of adjusted BAG from Protective Factors:", explained_variance_resil, "\n")
+
+# Create a label with the R-squared value displayed as "R²"
+label_text <- sprintf("R² = %.2f", explained_variance_resil)
+
+# Create the ggplot with the modified label text
+AdjBAG_Resil <- ggplot(resil_BAG, aes(x = resilience_new_1, y = forResilience_BAG_resid)) +
+  geom_point(size = 3) +
+  geom_text(x = max(resil_BAG$resilience_new_1)-1, y = min(resil_BAG$forResilience_BAG_resid)+2,
+    label = label_text, hjust = 1, vjust = 1,
+    size = 8  # Adjust the size as needed
+  ) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(x = "Protective Factors", y = "Adjusted Brain Age Gap")
+
+# Print the plot
+AdjBAG_Resil + theme_minimal(base_size = 22)
+plot_save <- AdjBAG_Resil + theme_minimal(base_size = 22)
+
+ggsave("adjusted_BAG_resilience_plot.tiff", plot_save, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+```
+
+### Predicting Adjusted BAG from SE Risk
+
+This adjusts for sex, site, comorbidities, IQR, FITT, and Protective Factors
+
+```{r, fig.width=16, fig.height=10, dpi=600}
+#| echo: false
+model_BAG_SERisk <- lm(forSERisk_BAG_resid ~ sd_risk_1, data = resil_BAG)
+explained_variance_SERisk <- summary(model_BAG_SERisk)$r.squared
+cat("Explained Variance (R-squared) in adjusted BAG from Socioenvironmental Risk:", explained_variance_SERisk, "\n")
+
+# Create a label with the R-squared value displayed as "R²"
+label_text <- sprintf("R² = %.2f", explained_variance_SERisk)
+
+# Create the ggplot with the modified label text
+AdjBAG_SERisk <- ggplot(resil_BAG, aes(x = sd_risk_1, y = forSERisk_BAG_resid)) +
+  geom_point(size = 3) +
+  geom_text(
+    x = max(resil_BAG$sd_risk_1), y = min(resil_BAG$forSERisk_BAG_resid)+2,
+    label = label_text, hjust = 1, vjust = 1,
+    size = 8  # Adjust the size as needed
+  ) +
+  geom_smooth(method = "lm", se = TRUE) +
+  labs(x = "Socioenvironmental Risk Score", y = "Adjusted Brain Age Gap")
+
+# Print the plot
+AdjBAG_SERisk + theme_minimal(base_size = 22)
+plotSERisk_save <- AdjBAG_SERisk + theme_minimal(base_size = 22)
+
+ggsave("adjusted_BAG_SERisk_plot.tiff", plotSERisk_save, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+```
+
+## *Post hoc* BAG Difference Plots
+
+### Protective Factors Group comparison. Scatter dots colored by FITT group and shape by SE Risk group
+
+BAG = the residuals of BAG from IQR, sex, site, and comorbidities
+
+```{r, fig.width=16, fig.height=10, dpi=600}
+#| echo: false
+
+theme_set(theme_minimal(base_size = 32))
+Fig1 <- ggplot(data=subset(resil_BAG, !is.na(resil_group)), aes(x = resil_group, y = BAG_resid_noSERisk)) +
+  geom_violin(trim = FALSE, scale = "width", fill = "lightgray", color = "black", alpha = 0.8, width = 0.6, draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_jitter(aes(color = fitt_high_low, shape = SE_risk_group), height = 0.05, width = 0.15, alpha = 0.8, size = 3) +
+  labs(x = "Protective Factors Group", y = "Adjusted Brain Age Gap") +
+  scale_color_discrete(name = "Chronic Pain Group") + 
+  scale_shape_discrete(name = "Socioenvironmental Risk Group") + 
+  scale_y_continuous(breaks = c(-25, -20, -15, -10, -5, 0, 5, 10, 15, 20)) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "bottom")
+Fig1
+
+## Posthoc Plots to save as TIFFs
+###### To save - Scatter dots colored by FITT group, shape by Socioenvironmental Risk group, and with BAG = the residuals of BAG from sex, site, and comorbidities
+theme_set(theme_minimal())
+Fig1 <- ggplot(data=subset(resil_BAG, !is.na(resil_group)), aes(x = resil_group, y = BAG_resid_noSERisk)) +
+  geom_violin(trim = FALSE, scale = "width", fill = "lightgray", color = "black", alpha = 0.8, width = 0.6, draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_jitter(aes(color = fitt_high_low, shape = SE_risk_group), height = 0.05, width = 0.15, alpha = 0.8, size = 3) +
+  labs(x = "Protective Factors Group", y = "Adjusted Brain Age Gap") +
+  scale_color_discrete(name = "Chronic Pain Group") + 
+  scale_shape_discrete(name = "Socioenvironmental Risk Group") + 
+  scale_y_continuous(breaks = c(-25, -20, -15, -10, -5, 0, 5, 10, 15, 20)) +
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "bottom")
+
+ggsave("Figure1.tiff", Fig1, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+```
+
+### SE Risk Group comparison. Scatter dots colored by Protective Factors group and shape by FITT group
+
+BAG = the residuals of BAG from IQR, sex, site, and comorbidities
+
+```{r, fig.width=16, fig.height=10, dpi=600}
+#| echo: false
+theme_set(theme_minimal(base_size = 32))
+Fig2 <- ggplot(data=subset(resil_BAG, !is.na(resil_group)), aes(x = SE_risk_group, y = BAG_resid_noSERisk)) +
+  geom_violin(trim = FALSE, scale = "width", fill = "lightgray", color = "black", alpha = 0.8, width = 0.6, draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_jitter(aes(color = resil_group, shape = fitt_high_low), height = 0.05, width = 0.15, alpha = 0.8, size = 3) +
+  labs(x = "Socioenvironmental Risk Group", y = "Adjusted Brain Age Gap") +
+  scale_color_discrete(name = "Protective Factors Group") +
+  scale_shape_discrete(name = "Chronic Pain Group") + 
+theme(plot.title = element_text(hjust = 0.5), legend.position = "bottom")
+Fig2
+
+## Posthoc Plots to save as TIFFs
+
+###### To save - Scatter dots colored by Protective Factors group, shape by FITT group, and with BAG = the residuals of BAG from sex, site, and comorbidities
+
+theme_set(theme_minimal())
+Fig2 <- ggplot(data=subset(resil_BAG, !is.na(resil_group)), aes(x = SE_risk_group, y = BAG_resid_noSERisk)) +
+  geom_violin(trim = FALSE, scale = "width", fill = "lightgray", color = "black", alpha = 0.8, width = 0.6, draw_quantiles = c(0.25, 0.5, 0.75)) +
+  geom_jitter(aes(color = fitt_high_low, shape = resil_group), height = 0.05, width = 0.15, alpha = 0.8, size = 3) +
+  labs(x = "Socioenvironmental Risk Group", y = "Adjusted Brain Age Gap") +
+  scale_color_discrete(name = "Chronic Pain Group") + 
+  scale_shape_discrete(name = "Protective Factors Group") + 
+  theme(plot.title = element_text(hjust = 0.5), legend.position = "bottom")
+
+ggsave("Figure2.tiff", Fig2, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+```
+
+## Aim 2 - Longitudinal
+
+### Summary statistics for the longitudinal group
+
+```{r}
+#| echo: false
+
+resil_BAG_long <- subset(resil_BAG, resil_BAG$BrainAgePython_long_tp2 > 0)
+summary_vars_BAG_long <- c("age", "sex", "site", "comorbid", "BAG", "BrainAgePython_long_tp1", "BrainAgePython_long_tp2", "IQR_tp1", "IQR_tp2", "avgLongIQR", "resilience_new_1", "sd_risk_1", "FITT_am")
+summary_stats_BAG_long <- describe(resil_BAG_long[, c(summary_vars_BAG_long)])
+
+print(summary_stats_BAG_long)
+
+# Remove rows with missing data in either BrainAgePython_long_tp1 or BrainAgePython_long_tp2
+cleaned_resil_BAG <- na.omit(resil_BAG[, c("BrainAgePython_long_tp1", "BrainAgePython_long_tp2")])
+
+# Calculate differences between the two time points
+cleaned_resil_BAG$difference <- cleaned_resil_BAG$BrainAgePython_long_tp2 - cleaned_resil_BAG$BrainAgePython_long_tp1
+
+# Calculate percentages
+increase_percentage <- sum(cleaned_resil_BAG$difference > 0) / nrow(cleaned_resil_BAG) * 100
+no_change_percentage <- sum(cleaned_resil_BAG$difference == 0) / nrow(cleaned_resil_BAG) * 100
+decrease_percentage <- sum(cleaned_resil_BAG$difference < 0) / nrow(cleaned_resil_BAG) * 100
+
+# Print the results
+cat("Percentage of Increase: ", increase_percentage, "%\n")
+cat("Percentage Unchanged: ", no_change_percentage, "%\n")
+cat("Percentage of Decrease: ", decrease_percentage, "%\n")
+
+#This should include an actual time point 2 age and not just an estimated age
+resil_BAG$BAG_change <- (resil_BAG$BrainAgePython_long_tp2 - (resil_BAG$age + 2)) - (resil_BAG$BrainAgePython_long_tp1 - resil_BAG$age)
+
+# Print the results
+cat("Percentage of samples where BrainAgePython_long_tp1 < BrainAgePython_long_tp2:", increase_percentage, "%\n")
+cat("Percentage of samples where BrainAgePython_long_tp1 > BrainAgePython_long_tp2:", decrease_percentage, "%\n")
+
+# Add a grouping variable based on BrainAgePython_long_tp1 > BrainAgePython_long_tp2
+resil_BAG$BrainAging_group <- ifelse(resil_BAG$BrainAgePython_long_tp1 > resil_BAG$BrainAgePython_long_tp2, 1, 0)
+
+# Initialize a list to store test results
+test_results <- list()
+
+# Iterate over the variables and perform the appropriate test
+for (var in summary_vars) {
+  # Check if the variable exists in the dataset
+  if (var %in% names(resil_BAG)) {
+    # For categorical variables 'sex' and 'site', perform chi-squared test
+    if (var %in% c("sex", "site")) {
+      # Create a contingency table
+      table <- table(resil_BAG[[var]], resil_BAG$BrainAging_group)
+      # Perform chi-squared test
+      test_result <- chisq.test(table)
+      # Store the result
+      test_results[[var]] <- list("Test" = "Chi-squared", "Result" = test_result)
+    } else {
+      # For continuous variables, perform t-test
+      test_result <- t.test(as.numeric(resil_BAG[[var]]) ~ resil_BAG$BrainAging_group, na.action = na.exclude)
+      # Store the result
+      test_results[[var]] <- list("Test" = "T-test", "Result" = test_result)
+    }
+  } else {
+    cat(paste("Variable", var, "not found in dataset.\n"))
+  }
+}
+
+# Print test results
+test_results
+```
+
+### Full linear mixed effects model with FITT, SE Risk, and Protective Factors
+
+```{r}
+#| echo: false
+#| warning: false
+
+# Ensure the necessary packages are installed and loaded
+if (!require("lmerTest", character.only = TRUE)) {
+  install.packages("lmerTest", repos = "http://cran.rstudio.com/")
+  library(lmerTest)
+}
+
+if (!require("performance", character.only = TRUE)) {
+  install.packages("performance", repos = "http://cran.rstudio.com/")
+  library(performance)
+}
+
+library(parameters)
+library(officer)
+library(flextable)
+
+if (!require("merDeriv", character.only = TRUE)) {
+  install.packages("merDeriv", repos = "http://cran.rstudio.com/")
+  library(merDeriv)
+}
+
+# Load your data
+resil_BA_lmer <- read.csv("ba_tall.csv")
+
+# Fit the model
+model_BA_lmer <- lmer(DBN_brainage ~ time + sex + age + site + comorbid + IQR + FITT_am + sd_risk_1 + resilience_new_1 + (1 | subject_id), data = resil_BA_lmer, REML = TRUE, na.action = na.exclude)
+
+#The following runs a time by Protective Factors interaction. This should test if there is a time varying effect of Protective Factors.
+#model_BA_lmer <- lmer(DBN_brainage ~ time + sex + age + site + comorbid + IQR + FITT_am + sd_risk_1 + resilience_new_1 + (1 | subject_id) + time*resilience_new_1, data = resil_BA_lmer, REML = TRUE, na.action = na.exclude)
+
+# Summary of the model
+summary(model_BA_lmer)
+
+# Confidence intervals
+confint(model_BA_lmer, method = "Wald")
+
+# Calculate R^2 for the mixed model
+r_squared <- performance::r2(model_BA_lmer)
+print(r_squared)
+
+# Manual calculation of standardized beta coefficients for fixed effects
+# This is a simplified approach and might not be suitable for all predictors, especially interactions or polynomial terms.
+standardized_coefs <- summary(model_BA_lmer)$coefficients[, "Estimate"] / sd(resil_BA_lmer$DBN_brainage)
+names(standardized_coefs) <- rownames(summary(model_BA_lmer)$coefficients)
+print(standardized_coefs)
+
+# Standardize the predictor and outcome variable
+resil_BA_lmer$std_resilience_new_1 <- scale(resil_BA_lmer$resilience_new_1, center = TRUE, scale = TRUE)
+resil_BA_lmer$std_DBN_brainage <- scale(resil_BA_lmer$DBN_brainage, center = TRUE, scale = TRUE)
+
+# Fit the model with the standardized predictor
+std_model_BA_lmer <- lmer(std_DBN_brainage ~ time + sex + age + site + comorbid + IQR + FITT_am + sd_risk_1 + std_resilience_new_1 + (1 | subject_id), data = resil_BA_lmer, REML = TRUE, na.action = na.exclude)
+
+# Get the summary of the model to inspect the standardized effect size of resilience_new_1
+summary(std_model_BA_lmer)
+
+params <- model_parameters(model_BA_lmer)
+
+# Format numerical columns to have 3 decimal places
+# Assuming params is a data frame and numerical values are in specific columns
+params$Estimate <- round(params$Coefficient, 2)
+params$SE <- round(params$SE, 2)
+params$CI_lower <- round(params$CI_low, 2)
+params$CI_upper <- round(params$CI_high, 2)
+params$t <- round(params$t, 2)
+params$p <- round(params$p, 3)
+
+# Convert parameters to a flextable (which can be used with officer)
+params_ft <- flextable(params)
+
+# Create a new Word document
+doc <- read_docx()
+
+# Add the flextable to the Word document
+doc <- doc %>%
+  body_add_flextable(value = params_ft)
+
+# Save the Word document
+print(doc, target = "Aim2_model_parameters_table.docx")
+
+#tab_model(model_BA_lmer, show.ci = TRUE, ci.lvl = 0.95, show.re.var = TRUE)
+```
+
+### LMM #2 with a time\*Protective Factors interaction
+
+```{r}
+#| echo: false
+#| warning: false
+
+# Ensure the necessary packages are installed and loaded
+if (!require("lmerTest", character.only = TRUE)) {
+  install.packages("lmerTest", repos = "http://cran.rstudio.com/")
+  library(lmerTest)
+}
+
+if (!require("performance", character.only = TRUE)) {
+  install.packages("performance", repos = "http://cran.rstudio.com/")
+  library(performance)
+}
+
+library(parameters)
+library(officer)
+library(flextable)
+
+if (!require("merDeriv", character.only = TRUE)) {
+  install.packages("merDeriv", repos = "http://cran.rstudio.com/")
+  library(merDeriv)
+}
+
+# Load your data
+resil_BA_lmer <- read.csv("ba_tall.csv")
+
+#The following runs a time by Protective Factors interaction. This should test if there is a time varying effect of Protective Factors.
+model_BA_lmer <- lmer(DBN_brainage ~ time + sex + age + site + comorbid + IQR + FITT_am + sd_risk_1 + resilience_new_1 + (1 | subject_id) + time*resilience_new_1, data = resil_BA_lmer, REML = TRUE, na.action = na.exclude)
+
+# Summary of the model
+summary(model_BA_lmer)
+
+# Confidence intervals
+confint(model_BA_lmer, method = "Wald")
+
+# Calculate R^2 for the mixed model
+r_squared <- performance::r2(model_BA_lmer)
+print(r_squared)
+
+params <- model_parameters(model_BA_lmer)
+
+# Format numerical columns to have 3 decimal places
+# Assuming params is a data frame and numerical values are in specific columns
+params$Estimate <- round(params$Coefficient, 2)
+params$SE <- round(params$SE, 2)
+params$CI_lower <- round(params$CI_low, 2)
+params$CI_upper <- round(params$CI_high, 2)
+params$t <- round(params$t, 2)
+params$p <- round(params$p, 3)
+
+# Convert parameters to a flextable (which can be used with officer)
+params_ft <- flextable(params)
+
+# Create a new Word document
+doc <- read_docx()
+
+# Add the flextable to the Word document
+doc <- doc %>%
+  body_add_flextable(value = params_ft)
+
+# Save the Word document
+print(doc, target = "Aim2_model_parameters_table2.docx")
+```
+
+### Post hoc Spaghetti Plots
+
+```{r, fig.width=16, fig.height=10, dpi=600}
+#| echo: false
+#| warning: false
+
+# Step 1: Calculate the median of resilience_new_1 at time 0
+median_resilience <- median(resil_BA_lmer$resilience_new_1[resil_BA_lmer$time == 0], na.rm = TRUE)
+
+# Step 2: Create a new variable for high/low Protective Factors group based on the median
+resil_BA_lmer <- resil_BA_lmer %>%
+  group_by(subject_id) %>%
+  mutate(resilience_group = ifelse(any(resilience_new_1[time == 0] > median_resilience, na.rm = TRUE), "High", "Low")) %>%
+  ungroup()
+
+# Now resil_BA_lmer has a new column `resilience_group` that is the same for all time points for each subject
+
+# First, split the data by time point
+data_time0 <- resil_BA_lmer %>% filter(time == 0)
+data_time1 <- resil_BA_lmer %>% filter(time == 1)
+
+# Fit linear models for each time point and calculate residuals
+model_time0 <- lm(DBN_brainage ~ age + sex + site + comorbid + IQR + FITT_am + sd_risk_1, data = data_time0)
+residuals_time0 <- residuals(model_time0)
+
+model_time1 <- lm(DBN_brainage ~ age + sex + site + comorbid + IQR + FITT_am + sd_risk_1, data = data_time1)
+residuals_time1 <- residuals(model_time1)
+
+# Add the residuals back to the respective data frames
+data_time0$resid_DBN_brainage <- residuals_time0
+data_time1$resid_DBN_brainage <- residuals_time1
+
+# Combine the data frames back into one tall dataset
+ba_tall_adjusted <- bind_rows(data_time0, data_time1)
+
+# Optionally, you might want to arrange the combined dataset by subject_id and time for clarity
+ba_tall_adjusted <- ba_tall_adjusted %>% arrange(subject_id, time)
+
+# Convert time to a factor with more descriptive labels
+ba_tall_adjusted$time <- factor(ba_tall_adjusted$time, levels = c(0, 1), labels = c("Baseline", "2 Year"))
+
+# Create the plot
+long_spaghetti <- ggplot(data = ba_tall_adjusted, aes(x = time, y = resid_DBN_brainage, group = subject_id)) +
+  geom_line(aes(group = subject_id, color = resilience_group), alpha = 0.1, linewidth = 0.5) +  # Color individual trajectories by resilience group
+  geom_point(aes(alpha = 0.5, color = resilience_group), alpha = 0.5) +  # Points for each observation, slightly transparent
+  geom_smooth(aes(group = resilience_group, color = resilience_group, fill = resilience_group), size = 1.0,
+              se = FALSE, alpha = 0.6, method = "lm") +  # Group mean trend lines with confidence intervals
+  scale_color_lancet() +  # Use Lancet color palette for lines
+  scale_fill_lancet(guide = "none") +  # Use Lancet color palette for fills, suppress fill legend
+  scale_x_discrete(expand = c(0.01, 0.01)) +  # Reduce margins around time points
+  theme_minimal() +  # Minimalistic theme
+  labs(x = "Time Point",
+       y = "Adjusted Brain Age",
+       color = "Protective Factors Group") +  # Label adjustments
+  theme(
+    text = element_text(size = 16),  # General text size for the plot
+    plot.title = element_text(size = 20, face = "bold"),  # Increase plot title size and make it bold
+    axis.title = element_text(size = 18),  # Increase axis titles size
+    axis.text = element_text(size = 16),  # Increase axis text size
+    legend.title = element_text(size = 16),  # Increase legend title size
+    legend.text = element_text(size = 14),  # Increase legend text size
+    plot.margin = unit(c(1, 1, 1, 1), "cm")  # Adjust plot margins
+  )
+
+print(long_spaghetti)
+
+# Print the plot
+#long_spaghetti + theme_minimal(base_size = 22)
+plot_save1 <- long_spaghetti
+
+ggsave("adjusted_longBA_resilience_spaghetti_plot.tiff", plot_save1, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+
+
+# Step 1: Calculate the first and third quartiles of resilience_new_1 at time 0
+quartiles_resilience <- quantile(resil_BA_lmer$resilience_new_1[resil_BA_lmer$time == 0], probs = c(0.25, 0.75), na.rm = TRUE)
+
+# Step 2: Create a new variable for resilience group based on the quartiles
+resil_BA_lmer <- resil_BA_lmer %>%
+  group_by(subject_id) %>%
+  mutate(resilience_group1 = case_when(
+    resilience_new_1[time == 0] <= quartiles_resilience[1] ~ "Low",
+    resilience_new_1[time == 0] > quartiles_resilience[1] & resilience_new_1[time == 0] <= quartiles_resilience[2] ~ "Medium",
+    resilience_new_1[time == 0] > quartiles_resilience[2] ~ "High",
+    TRUE ~ NA_character_ # This handles NAs or any other case not covered above
+  )) %>%
+  ungroup()
+
+# First, split the data by time point
+data_time0 <- resil_BA_lmer %>% filter(time == 0)
+data_time1 <- resil_BA_lmer %>% filter(time == 1)
+
+# Fit linear models for each time point and calculate residuals
+model_time0 <- lm(DBN_brainage ~ age + sex + site + comorbid + IQR + FITT_am + sd_risk_1, data = data_time0)
+residuals_time0 <- residuals(model_time0)
+
+model_time1 <- lm(DBN_brainage ~ age + sex + site + comorbid + IQR + FITT_am + sd_risk_1, data = data_time1)
+residuals_time1 <- residuals(model_time1)
+
+# Add the residuals back to the respective data frames
+data_time0$resid_DBN_brainage <- residuals_time0
+data_time1$resid_DBN_brainage <- residuals_time1
+
+# Combine the data frames back into one tall dataset
+ba_tall_adjusted <- bind_rows(data_time0, data_time1)
+
+# Optionally, you might want to arrange the combined dataset by subject_id and time for clarity
+ba_tall_adjusted <- ba_tall_adjusted %>% arrange(subject_id, time)
+
+# Convert time to a factor with more descriptive labels
+ba_tall_adjusted$time <- factor(ba_tall_adjusted$time, levels = c(0, 1), labels = c("Baseline", "2 Year"))
+
+long_spaghetti <- ggplot(data = ba_tall_adjusted, aes(x = time, y = resid_DBN_brainage, group = subject_id)) +
+  geom_line(aes(color = resilience_group1), alpha = 0.1, size = 0.5) +  # Color individual trajectories by resilience group
+  geom_point(aes(color = resilience_group1), alpha = 0.5, size = 1.5) +  # Points for each observation, slightly transparent
+  geom_smooth(aes(x = time, y = resid_DBN_brainage, group = resilience_group1, color = resilience_group1, fill = resilience_group1), method = "lm", se = FALSE, alpha = 0.6, size = 1) +  # Group mean trend lines
+  scale_color_manual(values = c("Low" = "#ed0303", "Medium" = "#985B90", "High" = "#04498d")) +  # Custom color palette
+  scale_fill_manual(values = c("Low" = "#ed0303", "Medium" = "#985B90", "High" = "#04498d"), guide = "none") +  # Matching fill colors, hide legend for fill
+  scale_x_discrete(expand = c(0, 0)) +  # Remove x-axis margins
+  theme_minimal() +  # Minimalistic theme
+  labs(x = "Time Point",
+       y = "Adjusted Brain Age",
+       color = "Protective Factors Group") +  # Updated labels for clarity
+  theme(
+    text = element_text(size = 16),
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 16),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")  # Adjust plot margins
+  )
+
+print(long_spaghetti)
+
+plot_save2 <- long_spaghetti
+
+ggsave("adjusted_longBA_resilience_spaghetti_plot_25_75_3-groups.tiff", plot_save2, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+
+cat("Low < 25%ile, Medium >25%ile <75%ile, High >75%ile")
+
+# Calculate the tertiles of resilience_new_1 at time 0
+tertiles_resilience <- quantile(resil_BA_lmer$resilience_new_1[resil_BA_lmer$time == 0], probs = c(1/3, 2/3), na.rm = TRUE)
+
+# Update the resilience group based on the tertiles
+resil_BA_lmer <- resil_BA_lmer %>%
+  group_by(subject_id) %>%
+  mutate(resilience_group2 = case_when(
+    resilience_new_1[time == 0] <= tertiles_resilience[1] ~ "Low",
+    resilience_new_1[time == 0] > tertiles_resilience[1] & resilience_new_1[time == 0] <= tertiles_resilience[2] ~ "Medium",
+    resilience_new_1[time == 0] > tertiles_resilience[2] ~ "High",
+    TRUE ~ NA_character_  # This handles NAs or any other case not covered above
+  )) %>%
+  ungroup()
+
+# First, split the data by time point
+data_time0 <- resil_BA_lmer %>% filter(time == 0)
+data_time1 <- resil_BA_lmer %>% filter(time == 1)
+
+# Fit linear models for each time point and calculate residuals
+model_time0 <- lm(DBN_brainage ~ age + sex + site + comorbid + IQR + FITT_am + sd_risk_1, data = data_time0)
+residuals_time0 <- residuals(model_time0)
+
+model_time1 <- lm(DBN_brainage ~ age + sex + site + comorbid + IQR + FITT_am + sd_risk_1, data = data_time1)
+residuals_time1 <- residuals(model_time1)
+
+# Add the residuals back to the respective data frames
+data_time0$resid_DBN_brainage <- residuals_time0
+data_time1$resid_DBN_brainage <- residuals_time1
+
+# Combine the data frames back into one tall dataset
+ba_tall_adjusted <- bind_rows(data_time0, data_time1)
+
+# Optionally, you might want to arrange the combined dataset by subject_id and time for clarity
+ba_tall_adjusted <- ba_tall_adjusted %>% arrange(subject_id, time)
+
+# Convert time to a factor with more descriptive labels
+ba_tall_adjusted$time <- factor(ba_tall_adjusted$time, levels = c(0, 1), labels = c("Baseline", "2 Year"))
+
+long_spaghetti <- ggplot(data = ba_tall_adjusted, aes(x = time, y = resid_DBN_brainage, group = subject_id)) +
+  geom_line(aes(color = resilience_group2), alpha = 0.1, size = 0.5) +  # Color individual trajectories by resilience group
+  geom_point(aes(color = resilience_group2), alpha = 0.5, size = 1.5) +  # Points for each observation, slightly transparent
+  geom_smooth(aes(x = time, y = resid_DBN_brainage, group = resilience_group2, color = resilience_group2, fill = resilience_group2), method = "lm", se = FALSE, alpha = 0.6, size = 1) +  # Group mean trend lines
+  scale_color_manual(values = c("Low" = "#ed0303", "Medium" = "#985B90", "High" = "#04498d")) +  # Custom color palette
+  scale_fill_manual(values = c("Low" = "#ed0303", "Medium" = "#985B90", "High" = "#04498d"), guide = "none") +  # Matching fill colors, hide legend for fill
+  scale_x_discrete(expand = c(0, 0)) +  # Remove x-axis margins
+  theme_minimal() +  # Minimalistic theme
+  labs(x = "Time Point",
+       y = "Adjusted Brain Age",
+       color = "Protective Factors Group") +  # Updated labels for clarity
+  theme(
+    text = element_text(size = 16),
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.title = element_text(size = 18),
+    axis.text = element_text(size = 16),
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 14),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10, unit = "pt")  # Adjust plot margins
+  )
+
+print(long_spaghetti)
+
+plot_save3 <- long_spaghetti
+
+ggsave("adjusted_longBA_resilience_spaghetti_plot_tertiles.tiff", plot_save3, width = 8, height = 5, units = "in", dpi = 600, compression = "lzw", bg = "white")
+
+cat("Low < 33%ile, Medium <33%ile <66%ile, High >66%ile")
+```
